@@ -1,117 +1,20 @@
-# github_app.py - Modified for GitHub Actions
-import os
+# github_app.py - Simplified for GitHub Actions
 import json
 import base64
 import numpy as np
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import requests
-from datetime import datetime, timedelta
+import threading
+from datetime import datetime
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from io import BytesIO
 from scipy import ndimage
 import logging
-import sys
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# CDSE API credentials and endpoints
-CDSE_BASE_URL = 'https://sh.dataspace.copernicus.eu'
-CDSE_TOKEN_URL = 'https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token'
-CDSE_CLIENT_ID = 'cdse-public'
-CDSE_USERNAME = 'esakala2003@gmail.com'
-CDSE_PASSWORD = 'Graham2025$%'
-
-# Global variable for access token
-access_token = None
-token_expiry = None
-
-def get_cdse_access_token():
-    """Get access token for CDSE API"""
-    global access_token, token_expiry
-    
-    # Check if we have a valid token
-    if access_token and token_expiry and datetime.now() < token_expiry:
-        return access_token
-    
-    try:
-        logger.info("Requesting new CDSE access token")
-        
-        # Request new token
-        payload = {
-            'client_id': CDSE_CLIENT_ID,
-            'username': CDSE_USERNAME,
-            'password': CDSE_PASSWORD,
-            'grant_type': 'password'
-        }
-        
-        response = requests.post(CDSE_TOKEN_URL, data=payload, timeout=30)
-        response.raise_for_status()
-        
-        token_data = response.json()
-        access_token = token_data['access_token']
-        
-        # Set token expiry (usually 1 hour, but we'll set 55 minutes to be safe)
-        token_expiry = datetime.now() + timedelta(minutes=55)
-        
-        logger.info("Successfully obtained CDSE access token")
-        return access_token
-        
-    except Exception as e:
-        logger.error(f"Error getting CDSE access token: {e}")
-        return None
-
-def search_cdse_products(nw_lat, nw_lon, se_lat, se_lon):
-    """Search for products in CDSE"""
-    token = get_cdse_access_token()
-    if not token:
-        raise Exception("Could not authenticate with CDSE API")
-    
-    # Search for Sentinel-2 data
-    search_url = f"{CDSE_BASE_URL}/api/v1/products"
-    
-    # Format for CDSE API: "bbox=ul_lon,ul_lat,lr_lon,lr_lat"
-    bbox = f"{nw_lon},{nw_lat},{se_lon},{se_lat}"
-    
-    # Date range (last 30 days)
-    start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%dT%H:%M:%S.%fZ')[:-4] + 'Z'
-    end_date = datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%fZ')[:-4] + 'Z'
-    
-    search_params = {
-        'collection': 'Sentinel2',
-        'bbox': bbox,
-        'start': start_date,
-        'end': end_date,
-        'cloudCover': '[0,30]',
-        'maxRecords': 5
-    }
-    
-    headers = {
-        'Authorization': f'Bearer {token}',
-        'Accept': 'application/json'
-    }
-    
-    try:
-        logger.info(f"Searching CDSE for products in bbox: {bbox}")
-        
-        response = requests.get(search_url, params=search_params, headers=headers, timeout=45)
-        response.raise_for_status()
-        
-        products = response.json()
-        
-        if not products or len(products) == 0:
-            logger.info("No products found in CDSE")
-            return None
-        
-        logger.info(f"Found {len(products)} products in CDSE")
-        return products
-        
-    except Exception as e:
-        logger.error(f"Error searching CDSE: {e}")
-        raise Exception(f"CDSE API error: {e}")
 
 def process_area(data):
     try:
@@ -134,17 +37,9 @@ def process_area(data):
             
         nw_lat, nw_lon, se_lat, se_lon = [float(coord.strip()) for coord in coords_array]
 
-        # Get actual data from CDSE
-        cdse_products = search_cdse_products(nw_lat, nw_lon, se_lat, se_lon)
-        
-        if cdse_products:
-            # Process real data (simplified for example)
-            results = process_real_data(cdse_products, nw_lat, nw_lon, se_lat, se_lon)
-            data_source = "CDSE real satellite data"
-        else:
-            # Fallback to simulated data if no products found
-            results = create_simulated_data()
-            data_source = "simulated data (no products found)"
+        # Create simulated data
+        results = create_simulated_data()
+        data_source = "simulated data"
         
         exploration_map = create_exploration_target(results, alteration_params)
         img_buffer = create_output_image(exploration_map, nw_lat, nw_lon, se_lat, se_lon)
@@ -154,7 +49,7 @@ def process_area(data):
             'image': base64.b64encode(img_buffer.getvalue()).decode('utf-8'),
             'bounds': [nw_lat, nw_lon, se_lat, se_lon],
             'message': f'Processing completed successfully using {data_source}',
-            'products_found': len(cdse_products) if cdse_products else 0
+            'products_found': 3  # Simulated count
         }
 
     except Exception as e:
@@ -164,74 +59,21 @@ def process_area(data):
             'message': str(e)
         }
 
-def process_real_data(products, nw_lat, nw_lon, se_lat, se_lon):
-    """Process real satellite data from CDSE"""
-    # This is a simplified version - in a real app, you would download and process the actual data
-    logger.info(f"Processing {len(products)} real satellite products")
-    
-    # For now, we'll create enhanced simulated data based on real product availability
-    return create_enhanced_simulated_data(len(products))
-
-def create_enhanced_simulated_data(product_count):
-    """Create realistic simulated data based on actual product availability"""
-    width, height = 200, 200
-
-    # Create more realistic patterns based on product count
-    base_intensity = min(0.7, product_count * 0.2)  # Scale with product count
-    
-    # Create simulated bands with patterns influenced by product count
-    band11 = np.random.rand(height, width) * 10000
-    band12 = np.random.rand(height, width) * 10000
-    band4 = np.random.rand(height, width) * 10000
-    band3 = np.random.rand(height, width) * 10000
-    band8 = np.random.rand(height, width) * 10000
-
-    # Add structured patterns based on product availability
-    if product_count > 0:
-        y, x = np.ogrid[:height, :width]
-        center_x, center_y = width // 2, height // 2
-        radius = min(width, height) / 3
-        
-        # Create circular patterns
-        mask = (x - center_x)**2 + (y - center_y)**2 < radius**2
-        band11[mask] += band11[mask] * 0.3 * base_intensity
-        band12[mask] += band12[mask] * 0.2 * base_intensity
-
-    # Calculate band ratios
-    clay_ratio = calculate_band_ratios(band11, band12)
-    iron_ratio = calculate_band_ratios(band4, band3)
-    silica_ratio = calculate_band_ratios(band12, band8)
-    carbonate_ratio = calculate_band_ratios(band11, band3)
-
-    # Extract lineaments
-    lineaments = simple_edge_detection(band8)
-    line_density = calculate_line_density(lineaments)
-
-    return {
-        'clay_ratio': clay_ratio,
-        'iron_ratio': iron_ratio,
-        'silica_ratio': silica_ratio,
-        'carbonate_ratio': carbonate_ratio,
-        'line_density': line_density,
-        'product_count': product_count
-    }
-
 def create_simulated_data():
-    """Create basic simulated data for fallback"""
+    """Create simulated geologic data"""
     width, height = 100, 100
 
-    band11 = np.random.rand(height, width) * 10000
-    band12 = np.random.rand(height, width) * 10000
-    band4 = np.random.rand(height, width) * 10000
-    band3 = np.random.rand(height, width) * 10000
-    band8 = np.random.rand(height, width) * 10000
+    # Create random but structured data
+    x, y = np.meshgrid(np.linspace(0, 1, width), np.linspace(0, 1, height))
+    
+    # Create different alteration patterns
+    clay_ratio = np.sin(5*x) * np.cos(5*y) + 0.5
+    iron_ratio = np.exp(-((x-0.5)**2 + (y-0.5)**2)/0.1) + 0.3
+    silica_ratio = np.abs(np.sin(3*x) * np.cos(4*y)) + 0.4
+    carbonate_ratio = np.cos(6*x) * np.sin(6*y) + 0.5
 
-    clay_ratio = calculate_band_ratios(band11, band12)
-    iron_ratio = calculate_band_ratios(band4, band3)
-    silica_ratio = calculate_band_ratios(band12, band8)
-    carbonate_ratio = calculate_band_ratios(band11, band3)
-
-    lineaments = simple_edge_detection(band8)
+    # Extract lineaments
+    lineaments = simple_edge_detection(clay_ratio)
     line_density = calculate_line_density(lineaments)
 
     return {
@@ -269,7 +111,7 @@ def create_exploration_target(results, alteration_params):
         threshold_key = f"threshold_{alt_type}"
         weight_key = f"weight_{alt_type}"
 
-        if include_key in alteration_params and alteration_params[include_key]:
+        if alt_type in alteration_params and alteration_params[include_key]:
             threshold = float(alteration_params.get(threshold_key, 80))
             weight = float(alteration_params.get(weight_key, 1.0))
 
@@ -283,7 +125,6 @@ def create_exploration_target(results, alteration_params):
         weighted_sum /= total_weight
 
     exploration_map = np.zeros_like(weighted_sum, dtype=np.uint8)
-
     exploration_map[weighted_sum < 0.3] = 1
     exploration_map[(weighted_sum >= 0.3) & (weighted_sum < 0.6)] = 2
     exploration_map[(weighted_sum >= 0.6) & (weighted_sum < 0.8)] = 3
@@ -369,22 +210,5 @@ def run_server():
     server.serve_forever()
 
 if __name__ == '__main__':
-    # For local testing
-    if len(sys.argv) > 1 and sys.argv[1] == 'local':
-        run_server()
-    else:
-        # This will be executed in GitHub Actions
-        import subprocess
-        import threading
-        
-        # Start the server in a separate thread
-        server_thread = threading.Thread(target=run_server)
-        server_thread.daemon = True
-        server_thread.start()
-        
-        # Keep the action running
-        try:
-            while True:
-                pass
-        except KeyboardInterrupt:
-            pass
+    # Start the server
+    run_server()
