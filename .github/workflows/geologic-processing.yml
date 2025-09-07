@@ -1,14 +1,22 @@
 name: Geologic Processing API
 
 on:
-  workflow_dispatch:  # Manual trigger
-  repository_dispatch:  # Allow external triggers via API
+  workflow_dispatch:
+    inputs:
+      coordinates:
+        description: 'Coordinates in format "NW_LAT,NW_LON,SE_LAT,SE_LON"'
+        required: true
+        default: '10.0,-5.0,9.0,-4.0'
+      parameters:
+        description: 'Processing parameters as JSON string'
+        required: false
+        default: '{}'
 
 jobs:
-  run-api:
+  process-area:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-
+    timeout-minutes: 15
+    
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -23,48 +31,20 @@ jobs:
         python -m pip install --upgrade pip
         pip install flask==2.3.3 flask-cors==4.0.0 numpy==1.24.3 scipy==1.10.1 matplotlib==3.7.2 Pillow==10.0.0 requests==2.31.0
 
-    - name: Create app directory structure
+    - name: Run processing
+      env:
+        CDSE_USERNAME: ${{ secrets.CDSE_USERNAME }}
+        CDSE_PASSWORD: ${{ secrets.CDSE_PASSWORD }}
+        COORDINATES: ${{ github.event.inputs.coordinates }}
+        PARAMETERS: ${{ github.event.inputs.parameters }}
       run: |
-        mkdir -p app
-        echo "Directory structure created"
-
-    - name: Run API server
-      run: |
-        # Start the server in the background
         cd app
-        python main.py &
-        SERVER_PID=$!
+        python main.py process --coordinates "$COORDINATES" --parameters '$PARAMETERS'
         
-        # Wait for server to start
-        echo "Waiting for server to start..."
-        sleep 15
-        
-        # Test the server health endpoint
-        echo "Testing server health..."
-        curl -f http://localhost:8080/health || echo "Health check failed"
-        
-        # Test the process endpoint
-        echo "Testing process endpoint..."
-        curl -X POST http://localhost:8080/process \
-          -H "Content-Type: application/json" \
-          -d '{"coordinates": "10.0, -5.0, 9.0, -4.0"}' \
-          --connect-timeout 30 \
-          --max-time 60 || echo "Process test failed"
-        
-        echo "Server is running with PID: $SERVER_PID"
-        
-        # Keep the server running for 5 minutes
-        sleep 300
-        
-        # Cleanup
-        kill $SERVER_PID
-        echo "Server stopped"
-
-    - name: Upload logs on failure
-      if: failure()
+    - name: Upload results
       uses: actions/upload-artifact@v4
       with:
-        name: server-logs
+        name: processing-results
         path: |
-          *.log
-        retention-days: 1
+          app/outputs/*
+        retention-days: 7
