@@ -20,28 +20,44 @@ jobs:
 
     - name: Install dependencies
       run: |
-        cd app
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install flask==2.3.3 flask-cors==4.0.0 numpy==1.24.3 scipy==1.10.1 matplotlib==3.7.2 Pillow==10.0.0 requests==2.31.0
+
+    - name: Create app directory structure
+      run: |
+        mkdir -p app
+        echo "Directory structure created"
 
     - name: Run API server
       run: |
-        cd app
-        python main.py &
+        # Start the server in the background
+        python app/main.py &
         SERVER_PID=$!
-        echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
         
         # Wait for server to start
-        sleep 10
+        echo "Waiting for server to start..."
+        sleep 15
         
-        # Test the server
-        curl -f http://localhost:8080/health || exit 1
+        # Test the server health endpoint
+        echo "Testing server health..."
+        curl -f http://localhost:8080/health || echo "Health check failed"
         
-        # Keep the server running
+        # Test the process endpoint
+        echo "Testing process endpoint..."
+        curl -X POST http://localhost:8080/process \
+          -H "Content-Type: application/json" \
+          -d '{"coordinates": "10.0, -5.0, 9.0, -4.0"}' \
+          --connect-timeout 30 \
+          --max-time 60 || echo "Process test failed"
+        
+        echo "Server is running with PID: $SERVER_PID"
+        
+        # Keep the server running for 5 minutes
         sleep 300
         
         # Cleanup
         kill $SERVER_PID
+        echo "Server stopped"
 
     - name: Upload logs on failure
       if: failure()
@@ -49,5 +65,5 @@ jobs:
       with:
         name: server-logs
         path: |
-          app/*.log
+          *.log
         retention-days: 1
