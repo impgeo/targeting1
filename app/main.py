@@ -14,7 +14,14 @@ from scipy import ndimage
 import logging
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('server.log'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
@@ -22,13 +29,16 @@ CORS(app)
 
 @app.route('/health', methods=['GET'])
 def health_check():
+    logger.info("Health check endpoint called")
     return jsonify({"status": "healthy", "message": "Geologic processing API is running"})
 
 @app.route('/process', methods=['POST'])
 def process_area():
     try:
+        logger.info("Process endpoint called")
         data = request.get_json()
         if not data:
+            logger.error("No JSON data received")
             return jsonify({
                 'status': 'error',
                 'message': 'No JSON data received'
@@ -38,6 +48,7 @@ def process_area():
         alteration_params = data.get('parameters', {})
 
         if not coordinates:
+            logger.error("No coordinates provided")
             return jsonify({
                 'status': 'error',
                 'message': 'No coordinates provided'
@@ -46,18 +57,21 @@ def process_area():
         # Convert coordinates to float
         coords_array = coordinates.split(',')
         if len(coords_array) != 4:
+            logger.error(f"Invalid coordinates format: {coordinates}")
             return jsonify({
                 'status': 'error',
                 'message': 'Invalid coordinates format. Expected 4 values separated by commas.'
             }), 400
             
         nw_lat, nw_lon, se_lat, se_lon = [float(coord.strip()) for coord in coords_array]
+        logger.info(f"Processing coordinates: {nw_lat}, {nw_lon}, {se_lat}, {se_lon}")
 
         # Process the data (simulated for now)
         results = process_geologic_data(nw_lat, nw_lon, se_lat, se_lon)
         exploration_map = create_exploration_target(results, alteration_params)
         img_buffer = create_output_image(exploration_map, nw_lat, nw_lon, se_lat, se_lon)
 
+        logger.info("Processing completed successfully")
         return jsonify({
             'status': 'success',
             'image': base64.b64encode(img_buffer.getvalue()).decode('utf-8'),
@@ -68,7 +82,7 @@ def process_area():
         })
 
     except Exception as e:
-        logger.error(f"Error in process_area: {e}")
+        logger.error(f"Error in process_area: {str(e)}", exc_info=True)
         return jsonify({
             'status': 'error',
             'message': str(e)
@@ -82,10 +96,6 @@ def process_geologic_data(nw_lat, nw_lon, se_lat, se_lon):
     width, height = 200, 200
     
     # Create coordinate-based patterns
-    lat_range = abs(nw_lat - se_lat)
-    lon_range = abs(se_lon - nw_lon)
-    
-    # Create simulated bands with patterns influenced by location
     x, y = np.meshgrid(np.linspace(0, 1, width), np.linspace(0, 1, height))
     
     # Create different alteration patterns based on coordinates
@@ -105,11 +115,6 @@ def process_geologic_data(nw_lat, nw_lon, se_lat, se_lon):
         'carbonate_ratio': carbonate_ratio,
         'line_density': line_density
     }
-
-def calculate_band_ratios(band1, band2):
-    return np.divide(band1.astype(float), band2.astype(float),
-                    out=np.zeros_like(band1.astype(float)),
-                    where=band2 != 0)
 
 def simple_edge_detection(data, threshold=0.1):
     sx = ndimage.sobel(data, axis=0, mode='constant')
@@ -180,4 +185,12 @@ def create_output_image(exploration_map, nw_lat, nw_lon, se_lat, se_lon):
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    logger.info(f"Starting server on port {port}")
+    logger.info(f"Current working directory: {os.getcwd()}")
+    logger.info(f"Files in directory: {os.listdir('.')}")
+    
+    try:
+        app.run(host='0.0.0.0', port=port, debug=False)
+    except Exception as e:
+        logger.error(f"Failed to start server: {str(e)}", exc_info=True)
+        raise
