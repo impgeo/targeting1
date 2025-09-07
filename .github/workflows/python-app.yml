@@ -1,0 +1,36 @@
+name: Python App
+
+on:
+  workflow_dispatch:  # Manual trigger
+  repository_dispatch:  # Allow external triggers via API
+
+jobs:
+  run-app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10  # Set a timeout to prevent infinite runs
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run Python app
+      run: |
+        python github_app.py &
+        APP_PID=$!
+        sleep 5  # Wait for server to start
+        
+        # Test the server is running
+        curl -X POST http://localhost:8080/process -H "Content-Type: application/json" -d '{"coordinates": "10,10,9,9"}'
+        
+        # Keep the action running for 5 minutes
+        sleep 300
+        kill $APP_PID
