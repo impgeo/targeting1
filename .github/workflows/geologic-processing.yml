@@ -1,0 +1,53 @@
+name: Geologic Processing API
+
+on:
+  workflow_dispatch:  # Manual trigger
+  repository_dispatch:  # Allow external triggers via API
+
+jobs:
+  run-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        cd app
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Run API server
+      run: |
+        cd app
+        python main.py &
+        SERVER_PID=$!
+        echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
+        
+        # Wait for server to start
+        sleep 10
+        
+        # Test the server
+        curl -f http://localhost:8080/health || exit 1
+        
+        # Keep the server running
+        sleep 300
+        
+        # Cleanup
+        kill $SERVER_PID
+
+    - name: Upload logs on failure
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: server-logs
+        path: |
+          app/*.log
+        retention-days: 1
